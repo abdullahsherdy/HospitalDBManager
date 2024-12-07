@@ -30,16 +30,16 @@ grant create session to user2;
 -- use it as user1.patients
 
 
-CREATE TABLE Patients (
-    id NUMBER PRIMARY KEY,
-    name VARCHAR2(100) NOT NULL,
-    date_of_birth DATE NOT NULL,
-    status VARCHAR2(50) NOT NULL, -- Admitted, Discharged, etc.
-    total_bill NUMBER(10, 2) DEFAULT 0,
-    room_type VARCHAR2(50) NOT NULL, -- Type of room requested
-    room_id NUMBER, -- ID of the assigned room
-    CONSTRAINT fk_room FOREIGN KEY (room_id) REFERENCES Rooms(id) -- Foreign key for room
-);
+--CREATE TABLE Patients (
+--    id NUMBER PRIMARY KEY,
+--    name VARCHAR2(100) NOT NULL,
+--    date_of_birth DATE NOT NULL,
+--    status VARCHAR2(50) NOT NULL, -- Admitted, Discharged, etc.
+--    total_bill NUMBER(10, 2) DEFAULT 0,
+--    room_type VARCHAR2(50) NOT NULL, -- Type of room requested
+--    room_id NUMBER, -- ID of the assigned room
+--    CONSTRAINT fk_room FOREIGN KEY (room_id) REFERENCES Rooms(id) -- Foreign key for room
+--);
 
 -- is been create by user, so we'll use it as user1.Rooms
 -- Rooms Table
@@ -324,15 +324,14 @@ BEGIN
     FROM Treatments
     WHERE patient_id = p_patient_id;
 
-    -- Update the total_bill column in the Patients table
+    -- Update the total_bill column in the Patients table by adding the total_cost to it 
     UPDATE user1.Patients
-    SET total_bill = total_cost
+    SET total_bill = total_bill + total_cost
     WHERE id = p_patient_id;
 
     -- Return the total cost for reference
     RETURN total_cost;
 END;
-
 -- Test Func
 -- Insert sample treatments
 INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
@@ -352,8 +351,64 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('Total Treatment Cost for Patient 1: ' || total);
 END;
 
--- 10. the Simultaion of blocker-waiting 
 
+
+-- 5. Discharge Processing 
+
+CREATE OR REPLACE PROCEDURE Dishcarge_patient(patient_id number)
+is 
+    reserved_room number;
+    old_data CLOB; -- To Store old date 
+    new_data CLOB;
+BEGIN   
+    Select JSON_OBJECT(
+                'id' value id,
+                'name' value name,
+                'date_of_birth' value date_of_birth,
+                'status' value status, -- Admitted, Discharged, etc.
+                'total_bill' value total_bill,
+                'room_type' value room_type, -- Type of room requested
+                'room_id' value room_id)
+        INTO old_data
+        FROM user1.Patients
+        WHERE id = patient_id;
+        
+    -- Fetch room_id 
+    SELECT room_id
+    INTO reserved_room
+    FROM USER1.Patients
+    WHERE id = patient_id;
+    
+    --- update patient status
+    UPDATE USER1.PATIENTS 
+    SET status = 'Discharged'
+    WHERE id = patient_id;
+    COMMIT;
+    
+    -- update the room availability 
+    UPDATE USRE1.Rooms
+    SET availability = TRUE
+    WHERE id = reserved_room;
+    
+    COMMIT;
+    
+    Select JSON_OBJECT(
+                'id' value id,
+                'name' value name,
+                'date_of_birth' value date_of_birth,
+                'status' value status, -- Admitted, Discharged, etc.
+                'total_bill' value total_bill,
+                'room_type' value room_type, -- Type of room requested
+                'room_id' value room_id)
+        INTO new_data
+        FROM user1.Patients
+        WHERE id = patient_id;
+    -- Log discharge data into AuditTrail
+    INSERT INTO AuditTrail (id, table_name, operation ,old_data, new_data, timestamp)
+    VALUES (audit_seq.NEXTVAL,'Patients', 'Discharge', old_data, new_data, SYSTIMESTAMP); 
+END;
+  
+-- 10. the Simultaion of blocker-waiting 
 -- Session 1 (User 1)
 UPDATE Rooms SET Availability = False WHERE id = 1;
 -- Do not commit.
