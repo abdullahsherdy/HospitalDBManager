@@ -238,7 +238,8 @@ INSERT INTO user1.Patients (id, name, date_of_birth, status, room_type)
 VALUES (patient_seq.NEXTVAL, 'Abdullah Hisham', TO_DATE('1990-01-01', 'YYYY-MM-DD'), 'Admitted', 'Single'); 
 
 
--- 2. Stored Procedure 
+-- 2. Appointmen Schedule 
+
 CREATE OR REPLACE PROCEDURE Appointment_Schedule (
     p_doctor_id IN NUMBER,
     p_appointment_time IN DATE,
@@ -274,25 +275,91 @@ BEGIN
 END;
 
 -- test the procedure 
--- insert into doctors 
 
+-- insert a test doctors 
+INSERT INTO Doctors (id, name, specialty, start_hour, end_hour)
+VALUES (doctor_seq.nextval, 'Dr. Smith', 'Cardiology', TO_DATE('2024-12-07 09:00:00', 'YYYY-MM-DD HH24:MI:SS'), 
+                                     TO_DATE('2024-12-07 17:00:00', 'YYYY-MM-DD HH24:MI:SS'));
+                                     
+INSERT INTO Doctors (id, name, specialty, start_hour, end_hour)
+VALUES (doctor_seq.nextval, 'Dr. Jones', 'Neurology', TO_DATE('2024-12-07 08:00:00', 'YYYY-MM-DD HH24:MI:SS'), 
+                                     TO_DATE('2024-12-07 16:00:00', 'YYYY-MM-DD HH24:MI:SS'));
+                                     
 -- insert a reserved appointment 
+INSERT INTO Appointments (id, patient_id, doctor_id, appointment_date, status)
+VALUES (appointment_seq.nextval,22 , 1, TO_DATE('2024-12-07 10:00:00', 'YYYY-MM-DD HH24:MI:SS'), 'Scheduled');
 
 -- exec Appointment_Schedule  
 
--- first case
+-- first case valid appointment time 
+BEGIN
+    Appointment_Schedule(p_doctor_id => 1,
+                         p_appointment_time => TO_DATE('2024-12-07 11:00:00', 'YYYY-MM-DD HH24:MI:SS'),
+                         p_patient_id => 23);
+END;
+-- Verify the result
+SELECT * FROM Appointments WHERE doctor_id = 1 AND appointment_date = TO_DATE('2024-12-07 11:00:00', 'YYYY-MM-DD HH24:MI:SS');
 
--- second case
+-- second case outside working hours (done)
+BEGIN
+    Appointment_Schedule(p_doctor_id => 1,
+                         p_appointment_time => TO_DATE('2024-12-07 18:00:00', 'YYYY-MM-DD HH24:MI:SS'),
+                         p_patient_id => 103);
+END;
+-- third case Conflicting appointment time (done)
+BEGIN
+    Appointment_Schedule(p_doctor_id => 1,
+                         p_appointment_time => TO_DATE('2024-12-07 10:00:00', 'YYYY-MM-DD HH24:MI:SS'),
+                         p_patient_id => 104);
+END;
 
--- third case 
+-- 3. Treatment Cost Calc
+CREATE OR REPLACE FUNCTION Calculate_Treatment_Cost(p_patient_id NUMBER)
+RETURN NUMBER IS
+    total_cost NUMBER(10, 2);
+BEGIN
+    -- Aggregate the total cost of treatments for the given patient
+    SELECT NVL(SUM(cost), 0)
+    INTO total_cost
+    FROM Treatments
+    WHERE patient_id = p_patient_id;
+
+    -- Update the total_bill column in the Patients table
+    UPDATE user1.Patients
+    SET total_bill = total_cost
+    WHERE id = p_patient_id;
+
+    -- Return the total cost for reference
+    RETURN total_cost;
+END;
+
+-- Test Func
+-- Insert sample treatments
+INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
+VALUES (treatment_seq.nextval, 22, 1, 'General Checkup', 50.00);
+
+INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
+VALUES (treatment_seq.nextval, 22, 1, 'X-Ray', 100.00);
+
+INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
+VALUES (treatment_seq.nextval, 23, 2, 'Blood Test', 75.00);
+
+-- Calculate and update the treatment cost for patient 1
+DECLARE
+    total NUMBER;
+BEGIN
+    total := Calculate_Treatment_Cost(22); -- output is 150 
+    DBMS_OUTPUT.PUT_LINE('Total Treatment Cost for Patient 1: ' || total);
+END;
+
 -- 10. the Simultaion of blocker-waiting 
+
 -- Session 1 (User 1)
 UPDATE Rooms SET Availability = False WHERE id = 1;
 -- Do not commit.
 
 -- Session 2 (User 2)
 UPDATE user1.Rooms SET Availability = True WHERE id = 1; -- This session will now wait because the row is locked by Session 1.
-
 
 
 --11. Query for Identifying Blocker and Waiting Sessions
