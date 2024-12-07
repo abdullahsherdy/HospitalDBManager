@@ -372,7 +372,13 @@ BEGIN
         INTO old_data
         FROM user1.Patients
         WHERE id = patient_id;
-        
+    
+    -- This will cause the room to be available in case when it assigned to another patient 
+    -- which will violate data integriy 
+    IF status = 'Discharged' THEN 
+       RAISE_APPLICATION_ERROR(-20001, 'Patient already been Discharged.');
+    END IF;
+    
     -- Fetch room_id 
     SELECT room_id
     INTO reserved_room
@@ -407,7 +413,58 @@ BEGIN
     INSERT INTO AuditTrail (id, table_name, operation ,old_data, new_data, timestamp)
     VALUES (audit_seq.NEXTVAL,'Patients', 'Discharge', old_data, new_data, SYSTIMESTAMP); 
 END;
-  
+
+--- Testing the Procedure 
+
+CREATE OR REPLACE FUNCTION BooleanToString(value BOOLEAN) RETURN VARCHAR2 IS
+BEGIN
+    IF value IS NULL THEN
+        RETURN 'NULL';
+    ELSIF value THEN
+        RETURN 'Available';
+    ELSE
+        RETURN 'Not Available';
+    END IF;
+END;
+commit;
+Declare 
+    patient_row user1.patients%ROWTYPE;
+    room_row user1.rooms%ROWTYPE;
+    audit_row AuditTrail%ROWTYPE;
+    room number;
+BEGIN
+     Dishcarge_patient(27);
+     SELECT * INTO patient_row
+     FROM user1.Patients 
+     WHERE id = 27;  -- Replace 27 with a valid patient ID
+     
+     SELECT  room_id into room 
+     FROM user1.Patients
+     WHERE id = 27;
+     
+     DBMS_OUTPUT.PUT_LINE('Patient Status: ' || patient_row.status);
+     
+     SELECT * INTO room_row
+     FROM user1.Rooms
+     WHERE id = room;
+     
+     DBMS_OUTPUT.PUT_LINE('Room Availability: ' ||BooleanToString( room_row.availability));
+
+     SELECT * INTO audit_row
+     FROM AuditTrail
+     WHERE table_name = 'Patients' AND operation = 'Discharge';
+     DBMS_OUTPUT.PUT_LINE('Audit operation: ' || audit_row.operation);
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        DBMS_OUTPUT.PUT_LINE('Patient or Room not found');
+        -- Handle any other exception scenarios
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error occurred: ' || SQLERRM);
+END;
+-- 6.Hos
+
+
 -- 10. the Simultaion of blocker-waiting 
 -- Session 1 (User 1)
 UPDATE Rooms SET Availability = False WHERE id = 1;
