@@ -313,7 +313,9 @@ BEGIN
                          p_patient_id => 104);
 END;
 
+
 -- 3. Treatment Cost Calc
+
 CREATE OR REPLACE FUNCTION Calculate_Treatment_Cost(p_patient_id NUMBER)
 RETURN NUMBER IS
     total_cost NUMBER(10, 2);
@@ -332,18 +334,17 @@ BEGIN
     -- Return the total cost for reference
     RETURN total_cost;
 END;
--- Test Func
--- Insert sample treatments
-INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
-VALUES (treatment_seq.nextval, 22, 1, 'General Checkup', 50.00);
 
-INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
-VALUES (treatment_seq.nextval, 22, 1, 'X-Ray', 100.00);
+-- Test Func, Firslty Insert Sample data and then Calculate the total Cost for a Pateitn
+    INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
+    VALUES (treatment_seq.nextval, 22, 1, 'General Checkup', 50.00);
+    
+    INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
+    VALUES (treatment_seq.nextval, 22, 1, 'X-Ray', 100.00);
+    
+    INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
+    VALUES (treatment_seq.nextval, 23, 2, 'Blood Test', 75.00);
 
-INSERT INTO Treatments (id, patient_id, doctor_id, treatment_description, cost)
-VALUES (treatment_seq.nextval, 23, 2, 'Blood Test', 75.00);
-
--- Calculate and update the treatment cost for patient 1
 DECLARE
     total NUMBER;
 BEGIN
@@ -351,10 +352,7 @@ BEGIN
     DBMS_OUTPUT.PUT_LINE('Total Treatment Cost for Patient 1: ' || total);
 END;
 
-
-
 -- 5. Discharge Processing 
-
 CREATE OR REPLACE PROCEDURE Dishcarge_patient(patient_id number)
 is 
     reserved_room number;
@@ -416,17 +414,6 @@ END;
 
 --- Testing the Procedure 
 
-CREATE OR REPLACE FUNCTION BooleanToString(value BOOLEAN) RETURN VARCHAR2 IS
-BEGIN
-    IF value IS NULL THEN
-        RETURN 'NULL';
-    ELSIF value THEN
-        RETURN 'Available';
-    ELSE
-        RETURN 'Not Available';
-    END IF;
-END;
-commit;
 Declare 
     patient_row user1.patients%ROWTYPE;
     room_row user1.rooms%ROWTYPE;
@@ -462,7 +449,9 @@ EXCEPTION
     WHEN OTHERS THEN
         DBMS_OUTPUT.PUT_LINE('Error occurred: ' || SQLERRM);
 END;
--- 6.Hos
+
+
+-- 6.Hospital
 
 
 -- 10. the Simultaion of blocker-waiting 
@@ -486,3 +475,18 @@ FROM
     LEFT JOIN V$SESSION b ON a.BLOCKING_SESSION = b.SID
 WHERE
     a.BLOCKING_SESSION IS NOT NULL;
+
+
+-- Utilities 
+
+-- Convert boolean to String to print it  
+CREATE OR REPLACE FUNCTION BooleanToString(value BOOLEAN) RETURN VARCHAR2 IS
+BEGIN
+    IF value IS NULL THEN
+        RETURN 'NULL';
+    ELSIF value THEN
+        RETURN 'Available';
+    ELSE
+        RETURN 'Not Available';
+    END IF;
+END;
