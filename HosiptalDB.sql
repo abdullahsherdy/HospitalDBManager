@@ -50,13 +50,28 @@ CREATE TABLE Rooms (
     availability boolean NOT NULL -- Available, Occupied, etc. (status)
 );
 
+/*
+    Assume that doctors will be available every day, so no need to add available days 
+    Just available hours, but for query optimization purpose we'll store it as a two vars 
+    start_hour -> the start of available slot 
+    end_hour -> the end of available slot 
+    for example if he'll be Available from 5AM : 8PM 
+    THE START WILL BE 5AM 
+    THE END WILL BE 8PM 
+    THE DATATYPE OF THESE COLS WILL BE DATE 
+    FOR FLEX COMPARISON IN THE RESERVATION OF AN APPOINTMENT
+    AND SO ON...
+*/
 -- Doctors Table
 CREATE TABLE Doctors (
     id NUMBER PRIMARY KEY,
     name VARCHAR2(100) NOT NULL,
     specialty VARCHAR2(100) NOT NULL,
-    available_hours VARCHAR2(100) -- Available hours in a readable format ('9AM-5PM')
+    -- available hours wil mspped into two columns 
+    start_hour DATE,
+    end_hour DATE
 );
+
 
 -- Appointments Table
 CREATE TABLE Appointments (
@@ -68,6 +83,7 @@ CREATE TABLE Appointments (
     CONSTRAINT fk_patient FOREIGN KEY (patient_id) REFERENCES user1.Patients (id),
     CONSTRAINT fk_doctor FOREIGN KEY (doctor_id) REFERENCES Doctors (id)
 );
+
 
 -- Treatments Table
 CREATE TABLE Treatments (
@@ -222,10 +238,53 @@ INSERT INTO user1.Patients (id, name, date_of_birth, status, room_type)
 VALUES (patient_seq.NEXTVAL, 'Abdullah Hisham', TO_DATE('1990-01-01', 'YYYY-MM-DD'), 'Admitted', 'Single'); 
 
 
+-- 2. Stored Procedure 
+CREATE OR REPLACE PROCEDURE Appointment_Schedule (
+    p_doctor_id IN NUMBER,
+    p_appointment_time IN DATE,
+    p_patient_id IN NUMBER
+) IS
+    reserved_appointments NUMBER; -- To get the total number of appointments reserved at the same time
+    doctor_start DATE;
+    doctor_end DATE;
+BEGIN
+    -- Fetch the doctor's working hours
+    SELECT start_hour, end_hour
+    INTO doctor_start, doctor_end
+    FROM Doctors
+    WHERE id = p_doctor_id;
 
+    -- Check if the time slot is already reserved
+    SELECT COUNT(*)
+    INTO reserved_appointments
+    FROM Appointments
+    WHERE appointment_date = p_appointment_time AND doctor_id = p_doctor_id;
 
+    -- Handle reservation conflicts or invalid times
+    IF reserved_appointments > 0 THEN
+        DBMS_OUTPUT.PUT_LINE('Time ' || TO_CHAR(p_appointment_time, 'YYYY-MM-DD HH24:MI:SS') || ' is already reserved.');
+        RAISE_APPLICATION_ERROR(-20001, 'The time of the appointment is not available.');
+    ELSIF p_appointment_time NOT BETWEEN doctor_start AND doctor_end THEN
+        RAISE_APPLICATION_ERROR(-20001, 'The time of the appointment is not within the doctor''s working hours.');
+    ELSE
+        -- Insert the appointment and mark it as scheduled
+        INSERT INTO Appointments(id, patient_id, doctor_id, appointment_date, status)
+        VALUES (appointment_seq.NEXTVAL, p_patient_id, p_doctor_id, p_appointment_time, 'Scheduled');
+    END IF;
+END;
 
+-- test the procedure 
+-- insert into doctors 
 
+-- insert a reserved appointment 
+
+-- exec Appointment_Schedule  
+
+-- first case
+
+-- second case
+
+-- third case 
 -- 10. the Simultaion of blocker-waiting 
 -- Session 1 (User 1)
 UPDATE Rooms SET Availability = False WHERE id = 1;
