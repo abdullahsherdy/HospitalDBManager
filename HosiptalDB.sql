@@ -1,4 +1,5 @@
 SET SERVEROUTPUT ON; 
+
 ALTER SESSION SET "_ORACLE_SCRIPT"=TRUE
 
 -- a sql statements to create a user to manage the Hospital database by sysdba 
@@ -30,16 +31,18 @@ grant create session to user2;
 -- use it as user1.patients
 
 
---CREATE TABLE Patients (
---    id NUMBER PRIMARY KEY,
---    name VARCHAR2(100) NOT NULL,
---    date_of_birth DATE NOT NULL,
---    status VARCHAR2(50) NOT NULL, -- Admitted, Discharged, etc.
---    total_bill NUMBER(10, 2) DEFAULT 0,
---    room_type VARCHAR2(50) NOT NULL, -- Type of room requested
---    room_id NUMBER, -- ID of the assigned room
---    CONSTRAINT fk_room FOREIGN KEY (room_id) REFERENCES Rooms(id) -- Foreign key for room
---);
+CREATE TABLE Patients (
+    id NUMBER PRIMARY KEY,
+    name VARCHAR2(100) NOT NULL,
+    date_of_birth DATE NOT NULL,
+    status VARCHAR2(50) NOT NULL, -- Admitted, Discharged, etc.
+    total_bill NUMBER(10, 2) DEFAULT 0, -- iNCLUDES (TREATMENT AND ROOM FEES) 
+    room_type VARCHAR2(50) NOT NULL, -- Type of room requested
+    room_id NUMBER, -- ID of the assigned room
+    admission_date DATE, -- THE DATE THE PATIENT REGISTER IN HOSPITAL
+    discharge_date DATE, -- THE DATE THE PATIENT CHECKOUT AND PAY TOTAL_BILL 
+    CONSTRAINT fk_room FOREIGN KEY (room_id) REFERENCES Rooms(id) -- Foreign key for room
+);
 
 -- is been create by user, so we'll use it as user1.Rooms
 -- Rooms Table
@@ -49,6 +52,7 @@ CREATE TABLE Rooms (
     capacity NUMBER NOT NULL, -- Number of beds in the room
     availability boolean NOT NULL -- Available, Occupied, etc. (status)
 );
+
 
 /*
     Assume that doctors will be available every day, so no need to add available days 
@@ -71,6 +75,7 @@ CREATE TABLE Doctors (
     start_hour DATE,
     end_hour DATE
 );
+
 
 
 -- Appointments Table
@@ -177,6 +182,9 @@ INSERT INTO user1.Patients (id, name, date_of_birth, status, room_type)
 VALUES (hospital_dba.patient_seq.NEXTVAL, 'Jhan Doe', TO_DATE('1985-05-12', 'YYYY-MM-DD'), 'Admitted', 'Double');
 
 
+SET AUTOCOMMIT ON;  -- to automatically commit changes 
+
+
 -- Features Implementation
 
 --- 1.Patient Admission Validation and 4 features are achieved using this trigger 
@@ -239,7 +247,6 @@ VALUES (patient_seq.NEXTVAL, 'Abdullah Hisham', TO_DATE('1990-01-01', 'YYYY-MM-D
 
 
 -- 2. Appointmen Schedule 
-
 CREATE OR REPLACE PROCEDURE Appointment_Schedule (
     p_doctor_id IN NUMBER,
     p_appointment_time IN DATE,
@@ -306,6 +313,7 @@ BEGIN
                          p_appointment_time => TO_DATE('2024-12-07 18:00:00', 'YYYY-MM-DD HH24:MI:SS'),
                          p_patient_id => 103);
 END;
+
 -- third case Conflicting appointment time (done)
 BEGIN
     Appointment_Schedule(p_doctor_id => 1,
@@ -451,10 +459,212 @@ EXCEPTION
 END;
 
 
--- 6.Hospital
+        
+-- 6.Hospital Performance report 
+Declare 
+    -- Variables to hold the report data
+    v_total_admissions    NUMBER;
+    v_total_discharges    NUMBER;
+    v_avg_stay_duration   NUMBER;
+    
+    
+    --- CURSOR Declration 
+    CURSOR c_top_doctors IS
+       SELECT t.doctor_id, d.name ,COUNT(*) AS treatments_handled
+        FROM treatments t
+        inner join doctors d
+        on t.doctor_id = d.id
+        GROUP BY doctor_id, d.name
+        ORDER BY treatments_handled DESC
+        FETCH FIRST 3 ROWS ONLY;
+        
+     -- Record type for doctor data
+    TYPE doctor_rec IS RECORD (
+        doctor_id NUMBER,     
+        doctor_name  VARCHAR2(100),
+        treatments_handled NUMBER
+    );
+
+    -- Variable to hold a doctor record
+    v_doctor doctor_rec;
+        
+Begin 
+
+     -- Calculate total admissions
+    SELECT COUNT(*) INTO v_total_admissions
+    FROM user1.patients
+    where status='Admitted';
+
+    -- Calculate total discharges
+    SELECT COUNT(*) INTO v_total_discharges
+    FROM user1.patients
+    where status='Discharged';
+
+    -- Calculate average stay duration
+    SELECT AVG(discharge_date - admission_date) INTO v_avg_stay_duration
+    FROM user1.patients
+    WHERE discharge_date IS NOT NULL;
+
+    -- Output the report
+    DBMS_OUTPUT.PUT_LINE('Hospital Performance Report');
+    DBMS_OUTPUT.PUT_LINE('---------------------------------------');
+    DBMS_OUTPUT.PUT_LINE('Total Admissions: ' || v_total_admissions);
+    DBMS_OUTPUT.PUT_LINE('Total Discharges: ' || v_total_discharges);
+    DBMS_OUTPUT.PUT_LINE('Average Patient Stay Duration: ' || ROUND(v_avg_stay_duration, 2) || ' days');
+    DBMS_OUTPUT.PUT_LINE('---------------------------------------');
+    DBMS_OUTPUT.PUT_LINE('Top 3 Doctors Based on Treatments:');
+    DBMS_OUTPUT.PUT_LINE('Doctor ID | Doctor Name | Treatments Handled');
+
+    -- Open the cursor for top doctors
+    OPEN c_top_doctors;
+
+    -- Loop through the cursor to get top three doctors
+    LOOP
+        FETCH c_top_doctors INTO v_doctor;
+
+        EXIT WHEN c_top_doctors%NOTFOUND;
+
+        -- Output each doctor's details
+        DBMS_OUTPUT.PUT_LINE(v_doctor.doctor_id || ' | ' || v_doctor.doctor_name || ' | ' || v_doctor.treatments_handled);
+    END LOOP;
+
+    -- Close the cursor
+    CLOSE c_top_doctors;
+    
+end;
+-- TODO insert in Treatments test data 
+
+-- 7. Cancle appointment in one transaction 
+declare 
+    appoint_row appointment%rowtype;
+    cursor c_appointments
+    is 
+        select * from appointments 
+        where appointment_date < SYSDATE
+        AND  STATUS = 'Scheduled';
+        
+begin 
+    LOOP
+        FETCH c_appointments INTO appoint_row;            
+       
+    END LOOP;
+end;
+
+/*  
+    Explanation 
+    
+    1.Cursor (PatientCursor):
+        Fetches all patients who either missed appointments or delayed bill payments.
+    2.Insert Warning:
+        Adds a record to the Warnings table for each patient meeting the criteria.
+    3.Count Warnings:
+        Checks if the patient has three or more warnings.
+    4.Update Status:
+        Changes the patient's status to "Flagged" if warnings reach the threshold.
+    5.AuditTrail Logging:
+        Logs the old and new statuses in the AuditTrail table.
+*/
+
+-- 8. Patient Warnings and Status Update 
+create or replace NONEDITIONABLE PROCEDURE IssueWarnings IS
+    --- Declare a cursor to fetch all paient that missed 
+    CURSOR PatientCursor IS
+        SELECT p.id AS patient_id, 
+               COUNT(w.id) AS warning_count
+        FROM user1.Patients p
+        LEFT JOIN Warnings w ON p.id = w.patient_id
+        WHERE EXISTS (
+            SELECT 1 
+            FROM Appointments a
+            WHERE a.patient_id = p.id 
+              AND a.status = 'Canceled'
+        ) OR p.total_bill > 0 -- Assuming unpaid bill is indicated by a non-zero amount
+        GROUP BY p.id;
+
+    v_warning_reason VARCHAR2(255);
+    v_warning_date DATE := SYSDATE;
+    v_warning_count NUMBER;
+    v_old_status VARCHAR2(50);
+    v_new_status VARCHAR2(50) := 'Flagged';
+
+BEGIN
+    -- Loop through patients who meet warning conditions
+    FOR PatientRecord IN PatientCursor LOOP
+        -- Determine warning reason
+        v_warning_reason := 'Missed appointment or unpaid bill';
+
+        -- Insert warning
+        INSERT INTO Warnings (id, patient_id, warning_reason, warning_date)
+        VALUES (warning_seq.NEXTVAL, PatientRecord.patient_id, v_warning_reason, v_warning_date);
+
+        -- Check total warnings
+        SELECT COUNT(*) INTO v_warning_count
+        FROM Warnings
+        WHERE patient_id = PatientRecord.patient_id;
+
+        -- If warnings reach 3, update the patient's status
+        IF v_warning_count >= 3 THEN
+            -- Get the old status
+            SELECT status INTO v_old_status
+            FROM user1.Patients
+            WHERE id = PatientRecord.patient_id;
+
+            -- Update patient status
+            UPDATE user1.Patients
+            SET status = v_new_status
+            WHERE id = PatientRecord.patient_id;
+          
+            -- Log the status update in AuditTrail
+            INSERT INTO AuditTrail (id, table_name, operation, old_data, new_data, timestamp)
+            VALUES (
+                Audit_seq.NEXTVAL,
+                'Patients',
+                'UPDATE',
+                'Old Status: ' || v_old_status,
+                'New Status: ' || v_new_status,
+                SYSDATE
+            );
+        commit; -- commit changes occurred 
+            
+        END IF;
+    END LOOP;
+END;
+--Test the Procedure 
+
+-- Insert into Appointments table
+
+-- Insert a canceled appointment
+INSERT INTO Appointments (id, patient_id, doctor_id, appointment_date, status)
+VALUES (appointment_seq.NEXTVAL, 23, 1, SYSDATE - 2, 'Canceled');
+
+-- Insert a completed appointment
+INSERT INTO Appointments (id, patient_id, doctor_id, appointment_date, status)
+VALUES (appointment_seq.NEXTVAL, 24, 2, SYSDATE - 10, 'Completed');
+
+-- Insert a scheduled appointment
+INSERT INTO Appointments (id, patient_id, doctor_id, appointment_date, status)
+VALUES (appointment_seq.NEXTVAL, 25, 2, SYSDATE + 5, 'Scheduled');
+
+-- Insert into Warnings table (simulate a previous warning)
+INSERT INTO Warnings (id, patient_id, warning_reason, warning_date)
+VALUES (warning_seq.NEXTVAL, 23, 'Missed appointment', SYSDATE - 3);
+
+BEGIN
+    IssueWarnings;
+END;
+
+-- Check the Warnings Table: Ensure the warning was added for the patients meeting the conditions.
+SELECT * FROM Warnings; 
+
+-- Check the Patients Table: Confirm the status of flagged patients has been updated
+SELECT * FROM user1.Patients; -- patient 23 named marks' status  is been updated
+--- verify logging
+SELECT * FROM AuditTrail;
+
 
 
 -- 10. the Simultaion of blocker-waiting 
+
 -- Session 1 (User 1)
 UPDATE Rooms SET Availability = False WHERE id = 1;
 -- Do not commit.
@@ -490,3 +700,23 @@ BEGIN
         RETURN 'Not Available';
     END IF;
 END;
+
+
+-- A deadlock occurs because Session 1(by user1) and Session 2 (by user2) are waiting for each other to release locks.
+select * from user1.rooms;
+-- to handle deadlock 
+DECLARE
+    deadlock_ex EXCEPTION;
+    PRAGMA EXCEPTION_INIT(deadlock_ex, -60);
+BEGIN
+    -- First transaction
+    UPDATE user1.patients SET room_id = 2 WHERE id = 23;
+    UPDATE user1.rooms SET availability = 'False' WHERE id = 22;
+EXCEPTION
+    WHEN deadlock_ex THEN
+        DBMS_OUTPUT.PUT_LINE('Deadlock detected! Retrying transaction...');
+        ROLLBACK;
+        -- Retry logic here, if necessary
+END;
+/
+
